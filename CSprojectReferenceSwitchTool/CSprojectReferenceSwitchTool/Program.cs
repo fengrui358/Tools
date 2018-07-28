@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace CSprojectReferenceSwitchTool
 {
@@ -9,7 +12,7 @@ namespace CSprojectReferenceSwitchTool
         static void Main(string[] args)
         {
             var baseDir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-            var allCsprojectsFiles = baseDir.GetFiles("*.csproj", SearchOption.AllDirectories).ToList();
+            var csprojectsFiles = baseDir.GetFiles("*.csproj", SearchOption.AllDirectories).ToList();
 
             if (args.Any())
             {
@@ -19,10 +22,18 @@ namespace CSprojectReferenceSwitchTool
 
                     if (dir.Exists)
                     {
-                        allCsprojectsFiles = allCsprojectsFiles.Where(s => !s.FullName.Contains(dir.FullName)).ToList();
+                        csprojectsFiles = csprojectsFiles.Where(s => !s.FullName.Contains(dir.FullName)).ToList();
                     }
                 }
             }
+
+            Parallel.ForEach(csprojectsFiles, csprojectsFile =>
+            {
+                var csProject = new CsProjectFile(csprojectsFile);
+                csProject.SwitchReferences();
+            });
+
+            Console.WriteLine("switch all references");
         }
     }
 }
