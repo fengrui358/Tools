@@ -13,26 +13,33 @@ namespace ScanRepeatFiles
             var files = Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories);
             foreach (var file in files)
             {
-                await using var stream = File.OpenRead(file);
-                var md5 = await SecurityHelper.Hash.Md5.ComputeHashFast(stream);
+                try
+                {
+                    await using var stream = File.OpenRead(file);
+                    var md5 = await SecurityHelper.Hash.Md5.ComputeHashFast(stream);
 
-                var fileName = Path.GetFileName(file);
-                if (md5Dic.ContainsKey(md5))
-                {
-                    md5Dic[md5].Add(fileName);
-                }
-                else
-                {
-                    md5Dic.Add(md5, new List<string> { fileName });
-                }
+                    var fileName = Path.GetFileName(file);
+                    if (md5Dic.ContainsKey(md5))
+                    {
+                        md5Dic[md5].Add(fileName);
+                    }
+                    else
+                    {
+                        md5Dic.Add(md5, new List<string> { fileName });
+                    }
 
-                if (fileNameDic.ContainsKey(fileName))
-                {
-                    fileNameDic[fileName].Add(fileName);
+                    if (fileNameDic.ContainsKey(fileName))
+                    {
+                        fileNameDic[fileName].Add(fileName);
+                    }
+                    else
+                    {
+                        fileNameDic.Add(fileName, new List<string> { fileName });
+                    }
                 }
-                else
+                catch
                 {
-                    fileNameDic.Add(fileName, new List<string> { fileName });
+                    Console.WriteLine(file + "  读取异常");
                 }
             }
 
