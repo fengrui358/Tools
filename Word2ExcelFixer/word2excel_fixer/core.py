@@ -4,14 +4,25 @@ Word2Excel Fixer 核心模块
 实现 Excel 表格修复逻辑：通过边框检测合并被拆分的单元格
 """
 
+import sys
+import sys
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Border, Side
+from openpyxl.cell import MergedCell
 from openpyxl.utils import get_column_letter
 from pathlib import Path
 from typing import Optional, List, Set, Tuple
 import logging
 
 # 配置日志
+if sys.platform == 'win32':
+    try:
+        # 在 Windows 上尝试使用 UTF-8 编码
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, LookupError):
+        pass
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -93,10 +104,12 @@ def _find_merge_groups_by_column(ws, max_row: int, max_col: int) -> dict:
     for col_idx in range(1, max_col + 1):
         merge_groups = []
         row_idx = 1
+
         while row_idx <= max_row:
             cell = ws.cell(row=row_idx, column=col_idx)
 
-            # 跳过空单元格
+            # 找到有内容的行作为合并组开始
+            # 注意：这里不跳过空行，因为空行也可能是合并组的一部分
             if not cell.value:
                 row_idx += 1
                 continue
@@ -110,9 +123,17 @@ def _find_merge_groups_by_column(ws, max_row: int, max_col: int) -> dict:
                 for next_row in range(row_idx + 1, max_row + 1):
                     next_cell = ws.cell(row=next_row, column=col_idx)
 
-                    # 如果遇到空单元格，停止查找
+                    # 如果遇到空单元格，继续查找（可能是合并组的中间行）
+                    # 但如果连续多个空单元格，可能到了表格末尾
                     if not next_cell.value:
-                        break
+                        # 检查是否后面还有非空单元格，如果有则继续
+                        has_more_content = False
+                        for check_row in range(next_row + 1, min(next_row + 5, max_row + 1)):
+                            if ws.cell(row=check_row, column=col_idx).value:
+                                has_more_content = True
+                                break
+                        if not has_more_content:
+                            break
 
                     # 找到有下边框的行，这是合并组的结束
                     if _has_bottom_border(next_cell):
@@ -194,11 +215,159 @@ def _merge_rows_content(ws, group: List[int], max_col: int) -> str:
     return merged_content
 
 
+def _identify_key_columns(ws, max_row: int, max_col: int) -> List[int]:
+    """
+    识别主键列（包含分组标识的列）
+
+    主键列的特征：
+    - 每个合并组的第一行有内容（如服务分类名称）
+    - 后续行为空或重复内容
+    - 该列的内容密度适中（不是太高也不是太低）
+
+    Args:
+        ws: 工作表对象
+        max_row: 最大行数
+        max_col: 最大列数
+
+    Returns:
+        主键列的列表（按优先级排序）
+    """
+    key_columns = []
+
+    for col_idx in range(1, max_col + 1):
+        # 统计非空单元格的数量和分组模式
+        non_empty_count = 0
+        group_starts = 0  # 分组开始的数量（有内容且后有空行的位置）
+        consecutive_empty = 0  # 连续空行的数量
+
+        for row_idx in range(1, max_row + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            has_content = cell.value and str(cell.value).strip()
+
+            if has_content:
+                non_empty_count += 1
+
+                # 检查是否是分组开始（当前有内容，且下一行是空）
+                if row_idx < max_row:
+                    next_cell = ws.cell(row=row_idx + 1, column=col_idx)
+                    if not next_cell.value or not str(next_cell.value).strip():
+                        group_starts += 1
+            else:
+                consecutive_empty += 1
+
+        # 计算密度（非空行占总行数的比例）
+        density = non_empty_count / max_row if max_row > 0 else 0
+
+        # 主键列的特征：
+        # - 密度适中（5%-50%之间），太高是描述列，太低是稀疏列
+        # - 有较多的分组开始位置
+        # - 有较多连续空行（表明是分组结构）
+
+        # 计算评分：分组开始数量权重最高，连续空行次之，密度适中再次
+        if 0.05 <= density <= 0.5 and group_starts >= 1:
+            # 综合评分
+            score = (
+                group_starts * 200 +  # 分组开始数量权重最高
+                consecutive_empty * 10 +  # 连续空行数量
+                (1 - abs(density - 0.2)) * 50  # 密度越接近20%越好
+            )
+            key_columns.append((col_idx, score, density, group_starts))
+
+    # 按评分排序
+    key_columns.sort(key=lambda x: x[1], reverse=True)
+
+    # 输出调试信息
+    if key_columns:
+        debug_info = []
+        for col, score, density, groups in key_columns[:5]:
+            debug_info.append(f"列{col}(密度{density:.1%},分组{groups})")
+        logger.debug(f"候选主键列: {debug_info}")
+
+    result = [col[0] for col in key_columns[:3]]
+
+    # 如果仍然没有找到，使用内容密度适中的列
+    if not result:
+        for col_idx in range(1, max_col + 1):
+            non_empty = sum(1 for r in range(1, max_row + 1)
+                          if ws.cell(row=r, column=col_idx).value)
+            density = non_empty / max_row
+            if 0.1 <= density <= 0.7:
+                result.append(col_idx)
+                if len(result) >= 3:
+                    break
+
+    # 如果还是没有，使用第一列
+    if not result and max_col >= 1:
+        result = [1]
+
+    return result
+
+
+def _find_merge_groups_by_key_column(ws, max_row: int, max_col: int, key_col: int) -> List[List[int]]:
+    """
+    基于主键列找出所有需要合并的行组
+
+    Args:
+        ws: 工作表对象
+        max_row: 最大行数
+        max_col: 最大列数
+        key_col: 主键列索引
+
+    Returns:
+        合并组列表 [[start_row, end_row], ...]
+    """
+    merge_groups = []
+    row_idx = 1
+
+    while row_idx <= max_row:
+        key_cell = ws.cell(row=row_idx, column=key_col)
+
+        # 找到有内容的主键行，作为合并组的开始
+        if not key_cell.value or not str(key_cell.value).strip():
+            row_idx += 1
+            continue
+
+        group_start = row_idx
+        group_end = row_idx
+
+        # 向下查找这个合并组的结束
+        # 结束条件：遇到下一个有主键内容的行，或者遇到表格末尾
+        for next_row in range(row_idx + 1, max_row + 1):
+            next_key_cell = ws.cell(row=next_row, column=key_col)
+
+            # 如果下一行有主键内容，说明是新组的开始
+            if next_key_cell.value and str(next_key_cell.value).strip():
+                break
+
+            # 检查其他列是否有下边框（标识合并组的结束）
+            has_bottom_border = False
+            for col_idx in range(1, max_col + 1):
+                cell = ws.cell(row=next_row, column=col_idx)
+                if _has_bottom_border(cell):
+                    has_bottom_border = True
+                    break
+
+            if has_bottom_border:
+                group_end = next_row
+                break
+
+            group_end = next_row
+
+        # 如果找到多行需要合并，添加到合并组
+        if group_end > group_start:
+            merge_groups.append([group_start, group_end])
+            row_idx = group_end + 1
+        else:
+            row_idx += 1
+
+    return merge_groups
+
+
 def _process_worksheet(ws) -> Tuple[int, int]:
     """
     处理单个工作表，执行合并操作
 
-    每列独立检测和合并被拆分的单元格。
+    基于主键列检测和合并被拆分的单元格。
 
     Args:
         ws: 工作表对象
@@ -215,50 +384,64 @@ def _process_worksheet(ws) -> Tuple[int, int]:
 
     logger.info(f"处理工作表 '{ws.title}': {max_row} 行 x {max_col} 列")
 
-    # 找出每列需要合并的行组
-    merge_groups_by_col = _find_merge_groups_by_column(ws, max_row, max_col)
+    # 识别主键列
+    key_columns = _identify_key_columns(ws, max_row, max_col)
+    logger.debug(f"候选主键列: {key_columns}")
 
-    if not merge_groups_by_col:
+    if not key_columns:
+        logger.info(f"工作表 '{ws.title}' 未找到主键列，跳过处理")
+        return 0, 0
+
+    # 基于第一个主键列找出合并组
+    key_col = key_columns[0]
+    merge_groups = _find_merge_groups_by_key_column(ws, max_row, max_col, key_col)
+
+    if not merge_groups:
         logger.info(f"工作表 '{ws.title}' 未发现需要合并的行")
         return 0, 0
 
-    total_groups = sum(len(groups) for groups in merge_groups_by_col.values())
-    logger.info(f"发现 {total_groups} 组需要合并的行（跨{len(merge_groups_by_col)}列）")
+    logger.info(f"发现 {len(merge_groups)} 组需要合并的行（基于列 {key_col}）")
 
     # 记录需要删除的行
     rows_to_delete: Set[int] = set()
 
-    # 按列处理合并组
-    for col_idx, merge_groups in merge_groups_by_col.items():
-        for group in merge_groups:
-            start_row, end_row = group
+    # 处理每个合并组
+    for group in merge_groups:
+        start_row, end_row = group
 
-            if end_row <= start_row:
-                continue
+        if end_row <= start_row:
+            continue
 
-            logger.debug(f"合并列 {col_idx}: 第 {start_row}-{end_row} 行")
+        logger.debug(f"合并行组: 第 {start_row}-{end_row} 行")
 
-            # 合并该列的内容
+        # 合并所有列的内容
+        for col_idx in range(1, max_col + 1):
             contents = []
             for row_idx in range(start_row, end_row + 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
+                # 跳过已合并的单元格（只读）
+                if isinstance(cell, MergedCell):
+                    continue
                 if cell.value:
                     contents.append(str(cell.value).strip())
 
             if contents:
                 # 合并内容到第一行
-                ws.cell(row=start_row, column=col_idx).value = '\n'.join(contents)
+                target_cell = ws.cell(row=start_row, column=col_idx)
+                if not isinstance(target_cell, MergedCell):
+                    target_cell.value = '\n'.join(contents)
 
                 # 清空被合并的行（保留第一行）
                 for row_idx in range(start_row + 1, end_row + 1):
                     cell = ws.cell(row=row_idx, column=col_idx)
-                    cell.value = None
+                    if not isinstance(cell, MergedCell):
+                        cell.value = None
 
-            # 标记需要检查删除的行（稍后统一处理）
-            for row_idx in range(start_row + 1, end_row + 1):
-                # 只有当整行都是空的时候才删除
-                if _is_empty_row(ws, row_idx, max_col):
-                    rows_to_delete.add(row_idx)
+        # 标记需要删除的行（稍后统一处理）
+        for row_idx in range(start_row + 1, end_row + 1):
+            # 只有当整行都是空的时候才删除
+            if _is_empty_row(ws, row_idx, max_col):
+                rows_to_delete.add(row_idx)
 
     # 删除多余的行（倒序删除，避免行号变化）
     deleted_rows = 0
@@ -268,7 +451,7 @@ def _process_worksheet(ws) -> Tuple[int, int]:
             ws.delete_rows(row_idx)
             deleted_rows += 1
 
-    return total_groups, deleted_rows
+    return len(merge_groups), deleted_rows
 
 
 def fix_excel_from_file(input_path: str, output_path: Optional[str] = None) -> str:

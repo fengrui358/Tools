@@ -9,6 +9,20 @@ import argparse
 from pathlib import Path
 from .core import fix_excel_from_file
 import logging
+import io
+
+
+def _configure_encoding():
+    """配置控制台编码以支持中文输出"""
+    if sys.platform == 'win32':
+        # 在 Windows 上尝试使用 UTF-8 编码
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+        except (AttributeError, LookupError):
+            # 如果 reconfigure 不可用或不支持，尝试设置环境变量
+            import os
+            os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 
 def main() -> int:
@@ -18,6 +32,9 @@ def main() -> int:
     Returns:
         int: 退出码（0 表示成功，非 0 表示失败）
     """
+    # 配置控制台编码
+    _configure_encoding()
+
     parser = argparse.ArgumentParser(
         description="修复从 Word 复制到 Excel 的表格问题",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -62,19 +79,19 @@ def main() -> int:
 
     try:
         output_path = fix_excel_from_file(args.input, args.output)
-        print(f"\n✓ 修复完成！输出文件: {output_path}")
+        print(f"\n[OK] 修复完成！输出文件: {output_path}")
         return 0
 
     except FileNotFoundError as e:
-        print(f"✗ 错误: {e}", file=sys.stderr)
+        print(f"[ERROR] 错误: {e}", file=sys.stderr)
         return 1
 
     except ValueError as e:
-        print(f"✗ 错误: {e}", file=sys.stderr)
+        print(f"[ERROR] 错误: {e}", file=sys.stderr)
         return 1
 
     except Exception as e:
-        print(f"✗ 处理失败: {e}", file=sys.stderr)
+        print(f"[ERROR] 处理失败: {e}", file=sys.stderr)
         return 1
 
 
