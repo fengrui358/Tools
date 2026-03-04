@@ -1,0 +1,16 @@
+[project]
+name = "word2excel-fixer"
+version = "1.0.0"
+description = "Fix Excel tables copied from Word by merging split cells back together"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1.0",
+]
+
+[project.scripts]
+word2excel-fix = "word2excel_fixer.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
