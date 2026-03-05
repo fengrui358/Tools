@@ -12,7 +12,7 @@ Word2Excel Fixer repairs Excel tables that were copied from Microsoft Word. When
 # Install dependencies
 uv sync
 
-# Run via CLI (preferred)
+# Run via CLI (uses column A as anchor by default)
 uv run word2excel-fix <path_to_excel_file>
 
 # Run with custom output path
@@ -22,7 +22,11 @@ uv run word2excel-fix <input> -o <output>
 uv run word2excel-fix <input> -v
 
 # Use as Python module
-uv run python -c "from word2excel_fixer import fix_excel; fix_excel('path/to/file.xlsx')"
+from word2excel_fixer import fix_excel
+fix_excel('path/to/file.xlsx')
+
+# With custom anchor column (1=Column A, 2=Column B, 4=Column D...)
+fix_excel('path/to/file.xlsx', anchor_column=4)
 ```
 
 ## Architecture
@@ -33,36 +37,33 @@ The project has three main modules:
 - `cli.py` - Command-line interface
 - `__init__.py` - Public API exports (`fix_excel`, `fix_excel_from_file`)
 
-## Core Algorithm (Critical)
+## Core Algorithm
 
-The merge detection logic is **per-column**, not global. This is important because different columns may have different split boundaries.
+The merge detection logic is based on an **anchor column** (锚定列) that identifies logical row boundaries.
+
+### What is an Anchor Column?
+
+An anchor column is a column where:
+- Each **logical row** has exactly one value
+- Rows with **empty values** should be merged into the previous non-empty row
 
 ### Detection Rule
 
-When Word tables are copied to Excel, split cells have this border pattern:
-- **Middle rows**: No bottom border (the cell was split)
-- **Last row**: Has bottom border (marks the original Word cell boundary)
-
-The algorithm:
-1. For each column, scan rows top to bottom
-2. When a row lacks a bottom border → start of a split group
-3. Continue down until finding a row with a bottom border → end of group
-4. Merge content from all rows in the group into the first row
-5. Delete the now-empty intermediate rows
+1. For each row, check if the anchor column has a value
+2. If the anchor column has a value → start of a new logical row
+3. If the anchor column is empty → merge this row into the previous logical row
+4. Merge all columns' content and delete the now-empty rows
 
 ### Key Functions
 
-- `_find_merge_groups_by_column()` - Returns `{col_idx: [[start, end], ...]}` mapping
-- `_process_worksheet()` - Orchestrates per-column merging and row deletion
-- `_has_bottom_border()` - Checks if a cell has a bottom border
+- `_find_merge_groups_by_key_column()` - Finds row groups to merge based on anchor column
+- `_process_worksheet()` - Orchestrates the merging process
+- `fix_excel_from_file()` - Main entry point for file processing
 
-### Important: Why Per-Column?
+### Default Behavior
 
-Consider a table where:
-- Column E: Row 30 is a complete cell (has bottom border), Rows 31-33 are split
-- Column F: Rows 30-33 are all part of one split cell (only Row 33 has bottom border)
-
-Global row-based merging would incorrectly merge Column E's Rows 30-33. Per-column processing handles this correctly.
+- By default, **column A (column 1)** is used as the anchor column
+- Users can specify a different anchor column via the `anchor_column` parameter
 
 ## Dependencies
 

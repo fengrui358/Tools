@@ -363,14 +363,15 @@ def _find_merge_groups_by_key_column(ws, max_row: int, max_col: int, key_col: in
     return merge_groups
 
 
-def _process_worksheet(ws) -> Tuple[int, int]:
+def _process_worksheet(ws, anchor_column: Optional[int] = None) -> Tuple[int, int]:
     """
     处理单个工作表，执行合并操作
 
-    基于主键列检测和合并被拆分的单元格。
+    基于锚定列检测和合并被拆分的单元格。
 
     Args:
         ws: 工作表对象
+        anchor_column: 锚定列索引（1-based），如果为None则自动识别
 
     Returns:
         (merged_groups, deleted_rows): 合并的组数和删除的行数
@@ -384,16 +385,22 @@ def _process_worksheet(ws) -> Tuple[int, int]:
 
     logger.info(f"处理工作表 '{ws.title}': {max_row} 行 x {max_col} 列")
 
-    # 识别主键列
-    key_columns = _identify_key_columns(ws, max_row, max_col)
-    logger.debug(f"候选主键列: {key_columns}")
+    # 确定锚定列
+    if anchor_column is not None:
+        key_col = anchor_column
+        logger.info(f"使用指定的锚定列: 列{key_col} ({get_column_letter(key_col)})")
+    else:
+        # 自动识别主键列
+        key_columns = _identify_key_columns(ws, max_row, max_col)
+        logger.debug(f"候选主键列: {key_columns}")
 
-    if not key_columns:
-        logger.info(f"工作表 '{ws.title}' 未找到主键列，跳过处理")
-        return 0, 0
+        if not key_columns:
+            logger.info(f"工作表 '{ws.title}' 未找到主键列，跳过处理")
+            return 0, 0
 
-    # 基于第一个主键列找出合并组
-    key_col = key_columns[0]
+        key_col = key_columns[0]
+
+    # 基于锚定列找出合并组
     merge_groups = _find_merge_groups_by_key_column(ws, max_row, max_col, key_col)
 
     if not merge_groups:
@@ -454,13 +461,15 @@ def _process_worksheet(ws) -> Tuple[int, int]:
     return len(merge_groups), deleted_rows
 
 
-def fix_excel_from_file(input_path: str, output_path: Optional[str] = None) -> str:
+def fix_excel_from_file(input_path: str, output_path: Optional[str] = None,
+                       anchor_column: int = 1) -> str:
     """
     修复从 Word 复制到 Excel 的表格文件
 
     Args:
         input_path: 输入的 Excel 文件路径
         output_path: 输出文件路径，默认为输入文件同目录下的 *_fixed.xlsx
+        anchor_column: 锚定列索引（1-based），默认为1（第一列）
 
     Returns:
         str: 输出文件的完整路径
@@ -487,6 +496,7 @@ def fix_excel_from_file(input_path: str, output_path: Optional[str] = None) -> s
 
     logger.info(f"开始处理文件: {input_path}")
     logger.info(f"输出文件: {output_path}")
+    logger.info(f"使用锚定列: 列{anchor_column} ({get_column_letter(anchor_column)})")
 
     try:
         # 加载工作簿
@@ -499,7 +509,7 @@ def fix_excel_from_file(input_path: str, output_path: Optional[str] = None) -> s
         # 处理所有工作表
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
-            groups, deleted = _process_worksheet(ws)
+            groups, deleted = _process_worksheet(ws, anchor_column)
             total_groups += groups
             total_deleted += deleted
             if groups > 0:
