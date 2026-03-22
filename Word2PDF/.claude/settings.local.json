@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(uv sync:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(where soffice:*)",
+      "Bash(where libreoffice:*)",
+      "Read(//c/Program Files/LibreOffice/program/**)",
+      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)",
+      "Bash(winget install:*)"
     ]
   }
 }

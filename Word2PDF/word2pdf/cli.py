@@ -64,7 +64,10 @@ def main(
         )
 
         report = converter.convert()
-        report.print_report()
+
+        # Get output directory for report file
+        output_dir = converter.output_dir
+        report.print_report(output_dir)
 
         # Exit with error code if any conversions failed
         if report.failed > 0:
