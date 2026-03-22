@@ -1,0 +1,26 @@
+[project]
+name = "ga-audit"
+version = "0.1.0"
+description = "Word document to PDF converter with AI-powered content audit"
+authors = [
+    {name = "free"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-docx>=1.1.2",
+    "docx2pdf>=0.1.8",
+    "zhipuai>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+
+[project.scripts]
+ga-audit = "ga_audit.main:main"
