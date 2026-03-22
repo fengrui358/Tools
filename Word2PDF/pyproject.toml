@@ -1,0 +1,21 @@
+[project]
+name = "word2pdf"
+version = "0.1.0"
+description = "Batch convert Word documents to PDF with parallel processing (cross-platform)"
+requires-python = ">=3.10"
+dependencies = [
+    "tqdm>=4.66.0",
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    "psutil>=6.0.0",
+]
+
+[project.scripts]
+word2pdf = "word2pdf.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []
